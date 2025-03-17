@@ -1,17 +1,17 @@
 import java.util.*;
 
 // Token class
-enum TokenType { VAR, IDENTIFIER, NUMBER, IF, ELSE, WHILE, PRINT, OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, LEFT_PAREN, RIGHT_PAREN, COMMA, EOF }
+enum TokenType { WOW, IDENTIFIER, NUMBER, IF, ELSE, WHILE, PRINT, OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, LEFT_PAREN, RIGHT_PAREN, COMMA, EOF }
 
 class Token {
     TokenType type;
     String value;
-    
+
     Token(TokenType type, String value) {
         this.type = type;
         this.value = value;
     }
-    
+
     public String toString() {
         return "(" + type + ", " + value + ")";
     }
@@ -21,7 +21,7 @@ class Token {
 class Lexer {
     private String input;
     private int pos = 0;
-    private static final Set<String> keywords = Set.of("var", "if", "else", "while", "print");
+    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print");
 
     Lexer(String input) {
         this.input = input;
@@ -50,6 +50,8 @@ class Lexer {
                 String word = ident.toString();
                 TokenType type = keywords.contains(word) ? TokenType.valueOf(word.toUpperCase()) : TokenType.IDENTIFIER;
                 tokens.add(new Token(type, word));
+                continue;  // Ensures that we do not fall into unintended cases
+
             } else if (Character.isDigit(current)) {
                 StringBuilder number = new StringBuilder();
                 while (Character.isDigit(peek())) {
@@ -59,9 +61,9 @@ class Lexer {
                 tokens.add(new Token(TokenType.NUMBER, number.toString()));
             } else {
                 switch (current) {
-                    case '=': tokens.add(new Token(TokenType.ASSIGN, "=")); break;
-                    case '+': case '-': case '*': case '/': case '%': 
-                        tokens.add(new Token(TokenType.OPERATOR, String.valueOf(current))); break;
+                    case '=': tokens.add(new Token(TokenType.ASSIGN, "=")); advance(); break;
+                    case '+': case '-': case '*': case '/': case '%':
+                        tokens.add(new Token(TokenType.OPERATOR, String.valueOf(current))); advance(); break;
                     case ';': tokens.add(new Token(TokenType.SEMICOLON, ";")); break;
                     case '(': tokens.add(new Token(TokenType.LEFT_PAREN, "(")); break;
                     case ')': tokens.add(new Token(TokenType.RIGHT_PAREN, ")")); break;
@@ -80,19 +82,23 @@ class Lexer {
 
 // AST Nodes
 abstract class ASTNode {}
+
 class VarDecl extends ASTNode {
     String name;
     ASTNode expr;
     VarDecl(String name, ASTNode expr) { this.name = name; this.expr = expr; }
 }
+
 class PrintStmt extends ASTNode {
     List<ASTNode> args;
     PrintStmt(List<ASTNode> args) { this.args = args; }
 }
+
 class Expression extends ASTNode {
     String value;
     Expression(String value) { this.value = value; }
 }
+
 class BinaryExpr extends ASTNode {
     ASTNode left;
     Token operator;
@@ -125,7 +131,7 @@ class Parser {
     List<ASTNode> parse() {
         List<ASTNode> nodes = new ArrayList<>();
         while (pos < tokens.size() - 1) {
-            if (peek().type == TokenType.VAR) {
+            if (peek().type == TokenType.WOW) {
                 nodes.add(parseVarDecl());
             } else if (peek().type == TokenType.PRINT) {
                 nodes.add(parsePrintStmt());
@@ -137,7 +143,7 @@ class Parser {
     }
 
     private ASTNode parseVarDecl() {
-        consume(TokenType.VAR);
+        consume(TokenType.WOW);
         Token ident = consume(TokenType.IDENTIFIER);
         consume(TokenType.ASSIGN);
         ASTNode expr = parseExpression();
@@ -188,34 +194,59 @@ class Parser {
     }
 }
 
-// Code Generator (Generates Python code)
 class CodeGenerator {
     String generate(List<ASTNode> nodes) {
         StringBuilder output = new StringBuilder();
+        Map<String, Integer> variables = new HashMap<>(); // Store variable values as integers
+
         for (ASTNode node : nodes) {
             if (node instanceof VarDecl varDecl) {
-                output.append(varDecl.name).append(" = ").append(((Expression) varDecl.expr).value).append("\n");
+                int value = evaluate(varDecl.expr, variables);
+                variables.put(varDecl.name, value);
             } else if (node instanceof PrintStmt printStmt) {
-                output.append("print(");
-                for (int i = 0; i < printStmt.args.size(); i++) {
-                    output.append(((Expression) printStmt.args.get(i)).value);
-                    if (i < printStmt.args.size() - 1) {
-                        output.append(", ");
-                    }
+                for (ASTNode arg : printStmt.args) {
+                    int value = evaluate(arg, variables);
+                    output.append(value).append("\n");
                 }
-                output.append(")\n");
             }
         }
         return output.toString();
     }
+
+    private int evaluate(ASTNode node, Map<String, Integer> variables) {
+        if (node instanceof Expression expr) {
+            if (variables.containsKey(expr.value)) {
+                return variables.get(expr.value); // Retrieve variable value
+            }
+            return Integer.parseInt(expr.value); // Convert number literals
+        } else if (node instanceof BinaryExpr binaryExpr) {
+            int left = evaluate(binaryExpr.left, variables);
+            int right = evaluate(binaryExpr.right, variables);
+            return applyOperator(left, right, binaryExpr.operator.value);
+        }
+        throw new RuntimeException("Invalid expression node: " + node);
+    }
+
+    private int applyOperator(int left, int right, String operator) {
+        return switch (operator) {
+            case "+" -> left + right;
+            case "-" -> left - right;
+            case "*" -> left * right;
+            case "/" -> left / right;
+            case "%" -> left % right;
+            default -> throw new RuntimeException("Unknown operator: " + operator);
+        };
+    }
 }
+
+
 
 // Compiler Runner
 public class PhaeCompiler {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter your code (Type 'END' to finish):");
-        
+
         StringBuilder codeBuilder = new StringBuilder();
         while (scanner.hasNextLine()) {
             String line = scanner.nextLine();
@@ -224,17 +255,10 @@ public class PhaeCompiler {
         }
         scanner.close();
 
-        String code = codeBuilder.toString();
-        Lexer lexer = new Lexer(code);
-        List<Token> tokens = lexer.tokenize();
-        System.out.println("Tokens: " + tokens);
-
-        Parser parser = new Parser(tokens);
-        List<ASTNode> ast = parser.parse();
-
+        Lexer lexer = new Lexer(codeBuilder.toString());
+        Parser parser = new Parser(lexer.tokenize());
         CodeGenerator generator = new CodeGenerator();
-        String pythonCode = generator.generate(ast);
 
-        System.out.println("Generated Python Code:\n" + pythonCode);
+        System.out.println(generator.generate(parser.parse()));
     }
 }
