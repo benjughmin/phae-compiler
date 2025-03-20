@@ -1,7 +1,11 @@
 import java.util.*;
 
 // Token class
-enum TokenType { WOW, IDENTIFIER, NUMBER, IF, ELSE, WHILE, PRINT, OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, LEFT_PAREN, RIGHT_PAREN, COMMA, EOF }
+enum TokenType { 
+    WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, 
+    OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, 
+    LEFT_PAREN, RIGHT_PAREN, COMMA, EOF 
+}
 
 class Token {
     TokenType type;
@@ -17,7 +21,7 @@ class Token {
     }
 }
 
-// Lexer: Converts input code into tokens
+// Lexer
 class Lexer {
     private String input;
     private int pos = 0;
@@ -50,8 +54,7 @@ class Lexer {
                 String word = ident.toString();
                 TokenType type = keywords.contains(word) ? TokenType.valueOf(word.toUpperCase()) : TokenType.IDENTIFIER;
                 tokens.add(new Token(type, word));
-                continue;  // Ensures that we do not fall into unintended cases
-
+                continue;
             } else if (Character.isDigit(current)) {
                 StringBuilder number = new StringBuilder();
                 while (Character.isDigit(peek())) {
@@ -59,20 +62,69 @@ class Lexer {
                     advance();
                 }
                 tokens.add(new Token(TokenType.NUMBER, number.toString()));
+            } else if (current == '"') {
+                advance(); // Skip opening quote
+                StringBuilder string = new StringBuilder();
+                while (peek() != '"' && peek() != '\0') {
+                    string.append(peek());
+                    advance();
+                }
+                if (peek() == '"') {
+                    advance(); // Skip closing quote
+                    tokens.add(new Token(TokenType.STRING, string.toString()));
+                } else {
+                    throw new RuntimeException("Unterminated string");
+                }
             } else {
                 switch (current) {
-                    case '=': tokens.add(new Token(TokenType.ASSIGN, "=")); advance(); break;
+                    case '=':
+                        advance();
+                        if (peek() == '=') {
+                            tokens.add(new Token(TokenType.OPERATOR, "=="));
+                            advance();
+                        } else {
+                            tokens.add(new Token(TokenType.ASSIGN, "="));
+                        }
+                        break;
+                    case '>':
+                        advance();
+                        if (peek() == '=') {
+                            tokens.add(new Token(TokenType.OPERATOR, ">="));
+                            advance();
+                        } else {
+                            tokens.add(new Token(TokenType.OPERATOR, ">"));
+                        }
+                        break;
+                    case '<':
+                        advance();
+                        if (peek() == '=') {
+                            tokens.add(new Token(TokenType.OPERATOR, "<="));
+                            advance();
+                        } else {
+                            tokens.add(new Token(TokenType.OPERATOR, "<"));
+                        }
+                        break;
+                    case '!':
+                        advance();
+                        if (peek() == '=') {
+                            tokens.add(new Token(TokenType.OPERATOR, "!="));
+                            advance();
+                        } else {
+                            throw new RuntimeException("Unexpected character: !");
+                        }
+                        break;
                     case '+': case '-': case '*': case '/': case '%':
-                        tokens.add(new Token(TokenType.OPERATOR, String.valueOf(current))); advance(); break;
-                    case ';': tokens.add(new Token(TokenType.SEMICOLON, ";")); break;
-                    case '(': tokens.add(new Token(TokenType.LEFT_PAREN, "(")); break;
-                    case ')': tokens.add(new Token(TokenType.RIGHT_PAREN, ")")); break;
-                    case '{': tokens.add(new Token(TokenType.LEFT_BRACE, "{")); break;
-                    case '}': tokens.add(new Token(TokenType.RIGHT_BRACE, "}")); break;
-                    case ',': tokens.add(new Token(TokenType.COMMA, ",")); break;
+                        tokens.add(new Token(TokenType.OPERATOR, String.valueOf(current)));
+                        advance();
+                        break;
+                    case ';': tokens.add(new Token(TokenType.SEMICOLON, ";")); advance(); break;
+                    case '(': tokens.add(new Token(TokenType.LEFT_PAREN, "(")); advance(); break;
+                    case ')': tokens.add(new Token(TokenType.RIGHT_PAREN, ")")); advance(); break;
+                    case '{': tokens.add(new Token(TokenType.LEFT_BRACE, "{")); advance(); break;
+                    case '}': tokens.add(new Token(TokenType.RIGHT_BRACE, "}")); advance(); break;
+                    case ',': tokens.add(new Token(TokenType.COMMA, ",")); advance(); break;
                     default: throw new RuntimeException("Unexpected character: " + current);
                 }
-                advance();
             }
         }
         tokens.add(new Token(TokenType.EOF, ""));
@@ -83,30 +135,55 @@ class Lexer {
 // AST Nodes
 abstract class ASTNode {}
 
-class VarDecl extends ASTNode {
-    String name;
-    ASTNode expr;
-    VarDecl(String name, ASTNode expr) { this.name = name; this.expr = expr; }
+class IfStmt extends ASTNode {
+    ASTNode condition;
+    List<ASTNode> thenBranch;
+    List<ASTNode> elseBranch;
+
+    IfStmt(ASTNode condition, List<ASTNode> thenBranch, List<ASTNode> elseBranch) {
+        this.condition = condition;
+        this.thenBranch = thenBranch;
+        this.elseBranch = elseBranch;
+    }
 }
 
 class PrintStmt extends ASTNode {
-    List<ASTNode> args;
-    PrintStmt(List<ASTNode> args) { this.args = args; }
+    ASTNode expression;
+
+    PrintStmt(ASTNode expression) {
+        this.expression = expression;
+    }
 }
 
 class Expression extends ASTNode {
     String value;
-    Expression(String value) { this.value = value; }
+    TokenType type;
+
+    Expression(String value, TokenType type) {
+        this.value = value;
+        this.type = type;
+    }
 }
 
 class BinaryExpr extends ASTNode {
     ASTNode left;
     Token operator;
     ASTNode right;
+
     BinaryExpr(ASTNode left, Token operator, ASTNode right) {
         this.left = left;
         this.operator = operator;
         this.right = right;
+    }
+}
+
+class VarAssign extends ASTNode {
+    String identifier;
+    ASTNode expression;
+
+    VarAssign(String identifier, ASTNode expression) {
+        this.identifier = identifier;
+        this.expression = expression;
     }
 }
 
@@ -119,22 +196,15 @@ class Parser {
         this.tokens = tokens;
     }
 
-    private Token consume(TokenType expected) {
-        Token token = tokens.get(pos);
-        if (token.type != expected) {
-            throw new RuntimeException("Expected " + expected + " but found " + token.type);
-        }
-        pos++;
-        return token;
-    }
-
     List<ASTNode> parse() {
         List<ASTNode> nodes = new ArrayList<>();
         while (pos < tokens.size() - 1) {
-            if (peek().type == TokenType.WOW) {
-                nodes.add(parseVarDecl());
+            if (peek().type == TokenType.IF) {
+                nodes.add(parseIfStmt());
             } else if (peek().type == TokenType.PRINT) {
                 nodes.add(parsePrintStmt());
+            } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
+                nodes.add(parseVarAssign());
             } else {
                 throw new RuntimeException("Unexpected token: " + peek().type);
             }
@@ -142,28 +212,55 @@ class Parser {
         return nodes;
     }
 
-    private ASTNode parseVarDecl() {
-        consume(TokenType.WOW);
-        Token ident = consume(TokenType.IDENTIFIER);
+    private ASTNode parseVarAssign() {
+        Token identifier = consume(TokenType.IDENTIFIER);
         consume(TokenType.ASSIGN);
-        ASTNode expr = parseExpression();
+        ASTNode expression = parseExpression();
         consume(TokenType.SEMICOLON);
-        return new VarDecl(ident.value, expr);
+        return new VarAssign(identifier.value, expression);
     }
 
     private ASTNode parsePrintStmt() {
         consume(TokenType.PRINT);
         consume(TokenType.LEFT_PAREN);
-        List<ASTNode> args = new ArrayList<>();
-        while (peek().type != TokenType.RIGHT_PAREN) {
-            args.add(parseExpression());
-            if (peek().type == TokenType.COMMA) {
-                consume(TokenType.COMMA);
-            }
-        }
+        ASTNode expression = parseExpression();
         consume(TokenType.RIGHT_PAREN);
         consume(TokenType.SEMICOLON);
-        return new PrintStmt(args);
+        return new PrintStmt(expression);
+    }
+
+    private ASTNode parseIfStmt() {
+        consume(TokenType.IF);
+        consume(TokenType.LEFT_PAREN);
+        ASTNode condition = parseExpression();
+        consume(TokenType.RIGHT_PAREN);
+        List<ASTNode> thenBranch = parseBlock();
+        List<ASTNode> elseBranch = new ArrayList<>();
+
+        if (peek().type == TokenType.ELSE) {
+            consume(TokenType.ELSE);
+            elseBranch = parseBlock();
+        }
+
+        return new IfStmt(condition, thenBranch, elseBranch);
+    }
+
+    private List<ASTNode> parseBlock() {
+        consume(TokenType.LEFT_BRACE);
+        List<ASTNode> statements = new ArrayList<>();
+        while (peek().type != TokenType.RIGHT_BRACE) {
+            if (peek().type == TokenType.IF) {
+                statements.add(parseIfStmt());
+            } else if (peek().type == TokenType.PRINT) {
+                statements.add(parsePrintStmt());
+            } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
+                statements.add(parseVarAssign());
+            } else {
+                throw new RuntimeException("Unexpected token in block: " + peek().type);
+            }
+        }
+        consume(TokenType.RIGHT_BRACE);
+        return statements;
     }
 
     private ASTNode parseExpression() {
@@ -179,67 +276,162 @@ class Parser {
     private ASTNode parsePrimary() {
         Token token = peek();
         if (token.type == TokenType.NUMBER) {
-            consume(TokenType.NUMBER);
-            return new Expression(token.value);
+            advance();
+            return new Expression(token.value, TokenType.NUMBER);
+        } else if (token.type == TokenType.STRING) {
+            advance();
+            return new Expression(token.value, TokenType.STRING);
         } else if (token.type == TokenType.IDENTIFIER) {
-            consume(TokenType.IDENTIFIER);
-            return new Expression(token.value);
+            advance();
+            return new Expression(token.value, TokenType.IDENTIFIER);
+        } else if (token.type == TokenType.LEFT_PAREN) {
+            advance();
+            ASTNode expr = parseExpression();
+            consume(TokenType.RIGHT_PAREN);
+            return expr;
         } else {
             throw new RuntimeException("Unexpected token: " + token.type);
         }
     }
 
+    private Token consume(TokenType expected) {
+        Token token = tokens.get(pos);
+        if (token.type != expected) {
+            throw new RuntimeException("Expected " + expected + " but found " + token.type);
+        }
+        pos++;
+        return token;
+    }
+
     private Token peek() {
         return tokens.get(pos);
     }
+
+    private Token peekNext() {
+        return pos + 1 < tokens.size() ? tokens.get(pos + 1) : tokens.get(pos);
+    }
+
+    private void advance() {
+        pos++;
+    }
 }
 
-class CodeGenerator {
-    String generate(List<ASTNode> nodes) {
-        StringBuilder output = new StringBuilder();
-        Map<String, Integer> variables = new HashMap<>(); // Store variable values as integers
-
+// Interpreter
+class Interpreter {
+    private Map<String, Object> variables = new HashMap<>();
+    
+    void interpret(List<ASTNode> nodes) {
         for (ASTNode node : nodes) {
-            if (node instanceof VarDecl varDecl) {
-                int value = evaluate(varDecl.expr, variables);
-                variables.put(varDecl.name, value);
-            } else if (node instanceof PrintStmt printStmt) {
-                for (ASTNode arg : printStmt.args) {
-                    int value = evaluate(arg, variables);
-                    output.append(value).append("\n");
+            execute(node);
+        }
+    }
+    
+    private void execute(ASTNode node) {
+        if (node instanceof PrintStmt printStmt) {
+            Object value = evaluate(printStmt.expression);
+            System.out.println(value);
+        } else if (node instanceof IfStmt ifStmt) {
+            boolean condition = isTrue(evaluate(ifStmt.condition));
+            if (condition) {
+                for (ASTNode stmt : ifStmt.thenBranch) {
+                    execute(stmt);
+                }
+            } else if (!ifStmt.elseBranch.isEmpty()) {
+                for (ASTNode stmt : ifStmt.elseBranch) {
+                    execute(stmt);
                 }
             }
+        } else if (node instanceof VarAssign varAssign) {
+            Object value = evaluate(varAssign.expression);
+            variables.put(varAssign.identifier, value);
         }
-        return output.toString();
     }
-
-    private int evaluate(ASTNode node, Map<String, Integer> variables) {
+    
+    private Object evaluate(ASTNode node) {
         if (node instanceof Expression expr) {
-            if (variables.containsKey(expr.value)) {
-                return variables.get(expr.value); // Retrieve variable value
+            if (expr.type == TokenType.NUMBER) {
+                return Integer.parseInt(expr.value);
+            } else if (expr.type == TokenType.STRING) {
+                return expr.value;
+            } else if (expr.type == TokenType.IDENTIFIER) {
+                if (!variables.containsKey(expr.value)) {
+                    throw new RuntimeException("Undefined variable: " + expr.value);
+                }
+                return variables.get(expr.value);
             }
-            return Integer.parseInt(expr.value); // Convert number literals
-        } else if (node instanceof BinaryExpr binaryExpr) {
-            int left = evaluate(binaryExpr.left, variables);
-            int right = evaluate(binaryExpr.right, variables);
-            return applyOperator(left, right, binaryExpr.operator.value);
+        } else if (node instanceof BinaryExpr binExpr) {
+            Object left = evaluate(binExpr.left);
+            Object right = evaluate(binExpr.right);
+            
+            switch (binExpr.operator.value) {
+                case "+":
+                    if (left instanceof Integer && right instanceof Integer) {
+                        return (Integer)left + (Integer)right;
+                    } else {
+                        return left.toString() + right.toString();
+                    }
+                case "-":
+                    checkNumbers(left, right);
+                    return (Integer)left - (Integer)right;
+                case "*":
+                    checkNumbers(left, right);
+                    return (Integer)left * (Integer)right;
+                case "/":
+                    checkNumbers(left, right);
+                    if ((Integer)right == 0) {
+                        throw new RuntimeException("Division by zero");
+                    }
+                    return (Integer)left / (Integer)right;
+                case "%":
+                    checkNumbers(left, right);
+                    return (Integer)left % (Integer)right;
+                case "==":
+                    return isEqual(left, right);
+                case "!=":
+                    return !isEqual(left, right);
+                case ">":
+                    checkNumbers(left, right);
+                    return (Integer)left > (Integer)right;
+                case ">=":
+                    checkNumbers(left, right);
+                    return (Integer)left >= (Integer)right;
+                case "<":
+                    checkNumbers(left, right);
+                    return (Integer)left < (Integer)right;
+                case "<=":
+                    checkNumbers(left, right);
+                    return (Integer)left <= (Integer)right;
+                default:
+                    throw new RuntimeException("Unknown operator: " + binExpr.operator.value);
+            }
         }
-        throw new RuntimeException("Invalid expression node: " + node);
+        
+        throw new RuntimeException("Could not evaluate node: " + node.getClass().getSimpleName());
     }
-
-    private int applyOperator(int left, int right, String operator) {
-        return switch (operator) {
-            case "+" -> left + right;
-            case "-" -> left - right;
-            case "*" -> left * right;
-            case "/" -> left / right;
-            case "%" -> left % right;
-            default -> throw new RuntimeException("Unknown operator: " + operator);
-        };
+    
+    private boolean isEqual(Object a, Object b) {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        return a.equals(b);
+    }
+    
+    private boolean isTrue(Object obj) {
+        if (obj instanceof Boolean) {
+            return (Boolean)obj;
+        } else if (obj instanceof Integer) {
+            return (Integer)obj != 0;
+        } else if (obj instanceof String) {
+            return !((String)obj).isEmpty();
+        }
+        return false;
+    }
+    
+    private void checkNumbers(Object left, Object right) {
+        if (!(left instanceof Integer && right instanceof Integer)) {
+            throw new RuntimeException("Numeric operators only work on numbers");
+        }
     }
 }
-
-
 
 // Compiler Runner
 public class PhaeCompiler {
@@ -255,10 +447,18 @@ public class PhaeCompiler {
         }
         scanner.close();
 
-        Lexer lexer = new Lexer(codeBuilder.toString());
-        Parser parser = new Parser(lexer.tokenize());
-        CodeGenerator generator = new CodeGenerator();
-
-        System.out.println(generator.generate(parser.parse()));
+        try {
+            String sourceCode = codeBuilder.toString();
+            Lexer lexer = new Lexer(sourceCode);
+            List<Token> tokens = lexer.tokenize();
+            
+            Parser parser = new Parser(tokens);
+            List<ASTNode> ast = parser.parse();
+            
+            Interpreter interpreter = new Interpreter();
+            interpreter.interpret(ast);
+        } catch (RuntimeException e) {
+            System.err.println("Error: " + e.getMessage());
+        }
     }
 }
