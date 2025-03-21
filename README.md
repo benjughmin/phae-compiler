@@ -6,20 +6,22 @@
 
 ```  
 # Set the number of iterations  
-x = 5  
+x = 5; 
 
-for i in range(x):  
-    expression  
+for i in range(x){ 
+    expression;
+}  
 ```  
 
 #### Example  
 
 ```  
 # Print numbers from 0 to 4  
-x = 5  
+x = 5;
 
-for i in range(x):  
-    print(i)  
+for i in range(x){
+    print(i);
+}  
 ```  
 
 #### Output  
