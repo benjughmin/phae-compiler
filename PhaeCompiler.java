@@ -2,7 +2,7 @@ import java.util.*;
 
 // Token class
 enum TokenType { 
-    WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, 
+    WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, FOR, IN, RANGE,
     OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, 
     LEFT_PAREN, RIGHT_PAREN, COMMA, EOF 
 }
@@ -25,7 +25,7 @@ class Token {
 class Lexer {
     private String input;
     private int pos = 0;
-    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print");
+    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print", "for", "in", "range");
 
     Lexer(String input) {
         this.input = input;
@@ -135,6 +135,33 @@ class Lexer {
 // AST Nodes
 abstract class ASTNode {}
 
+// for loop node
+class ForLoop extends ASTNode {
+    String variable;     // Loop variable name
+    ASTNode iterable;    // What we're iterating over
+    List<ASTNode> body;  // Loop body
+
+    ForLoop(String variable, ASTNode iterable, List<ASTNode> body) {
+        this.variable = variable;
+        this.iterable = iterable;
+        this.body = body;
+    }
+}
+
+// range() node
+class RangeExpr extends ASTNode {
+    ASTNode start;
+    ASTNode end;
+    ASTNode step;  
+
+    RangeExpr(ASTNode start, ASTNode end, ASTNode step) {
+        this.start = start;
+        this.end = end;
+        this.step = step;
+    }
+}
+
+// if statement node
 class IfStmt extends ASTNode {
     ASTNode condition;
     List<ASTNode> thenBranch;
@@ -147,6 +174,7 @@ class IfStmt extends ASTNode {
     }
 }
 
+// print statement node
 class PrintStmt extends ASTNode {
     ASTNode expression;
 
@@ -155,6 +183,7 @@ class PrintStmt extends ASTNode {
     }
 }
 
+// expression node
 class Expression extends ASTNode {
     String value;
     TokenType type;
@@ -165,6 +194,7 @@ class Expression extends ASTNode {
     }
 }
 
+// binary expression node
 class BinaryExpr extends ASTNode {
     ASTNode left;
     Token operator;
@@ -177,6 +207,7 @@ class BinaryExpr extends ASTNode {
     }
 }
 
+// variable assignment node
 class VarAssign extends ASTNode {
     String identifier;
     ASTNode expression;
@@ -203,6 +234,8 @@ class Parser {
                 nodes.add(parseIfStmt());
             } else if (peek().type == TokenType.PRINT) {
                 nodes.add(parsePrintStmt());
+            } else if (peek().type == TokenType.FOR) {  
+                nodes.add(parseForLoop());
             } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
                 nodes.add(parseVarAssign());
             } else {
@@ -212,6 +245,66 @@ class Parser {
         return nodes;
     }
 
+    // for loop parsing
+    private ASTNode parseForLoop() {
+        consume(TokenType.FOR);
+        
+        // Parse the loop variable
+        Token identifier = consume(TokenType.IDENTIFIER);
+        String variable = identifier.value;
+        
+        consume(TokenType.IN);
+        
+        // Parse the iterable (range())
+        ASTNode iterable;
+        if (peek().type == TokenType.RANGE) {
+            iterable = parseRange();
+        } else {
+            throw new RuntimeException("Only 'range' iterables are supported");
+        }
+        
+        // Parse body
+        List<ASTNode> body = parseBlock();
+        
+        return new ForLoop(variable, iterable, body);
+    }
+    
+    // range() parsing
+    private ASTNode parseRange() {
+        consume(TokenType.RANGE);
+        consume(TokenType.LEFT_PAREN);
+        
+        ASTNode start = parseExpression();
+        
+        ASTNode end = null;
+        if (peek().type == TokenType.COMMA) {
+            consume(TokenType.COMMA);
+            end = parseExpression();
+        }
+        
+        ASTNode step = null;
+        if (peek().type == TokenType.COMMA) {
+            consume(TokenType.COMMA);
+            step = parseExpression();
+        }
+        
+        consume(TokenType.RIGHT_PAREN);
+        
+        // If only one arg, it's the end (with implicit start at 0)
+        if (end == null) {
+            end = start;
+            start = new Expression("0", TokenType.NUMBER);
+        }
+        
+        // Default step is 1
+        if (step == null) {
+            step = new Expression("1", TokenType.NUMBER);
+        }
+        
+        return new RangeExpr(start, end, step);
+    }
+
+    // variable assignment parsing
     private ASTNode parseVarAssign() {
         Token identifier = consume(TokenType.IDENTIFIER);
         consume(TokenType.ASSIGN);
@@ -220,6 +313,7 @@ class Parser {
         return new VarAssign(identifier.value, expression);
     }
 
+    // print statement parsing
     private ASTNode parsePrintStmt() {
         consume(TokenType.PRINT);
         consume(TokenType.LEFT_PAREN);
@@ -229,6 +323,7 @@ class Parser {
         return new PrintStmt(expression);
     }
 
+    // if statement parsing
     private ASTNode parseIfStmt() {
         consume(TokenType.IF);
         consume(TokenType.LEFT_PAREN);
@@ -245,6 +340,7 @@ class Parser {
         return new IfStmt(condition, thenBranch, elseBranch);
     }
 
+    // block parsing
     private List<ASTNode> parseBlock() {
         consume(TokenType.LEFT_BRACE);
         List<ASTNode> statements = new ArrayList<>();
@@ -253,6 +349,8 @@ class Parser {
                 statements.add(parseIfStmt());
             } else if (peek().type == TokenType.PRINT) {
                 statements.add(parsePrintStmt());
+            } else if (peek().type == TokenType.FOR) {  // Add this case
+                statements.add(parseForLoop());
             } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
                 statements.add(parseVarAssign());
             } else {
@@ -263,6 +361,7 @@ class Parser {
         return statements;
     }
 
+    // expression parsing
     private ASTNode parseExpression() {
         ASTNode left = parsePrimary();
         while (peek().type == TokenType.OPERATOR) {
@@ -339,6 +438,24 @@ class Interpreter {
             } else if (!ifStmt.elseBranch.isEmpty()) {
                 for (ASTNode stmt : ifStmt.elseBranch) {
                     execute(stmt);
+                }
+            }
+        } else if (node instanceof ForLoop forLoop) {
+            // Evaluate the iterable
+            if (forLoop.iterable instanceof RangeExpr rangeExpr) {
+                int start = (int) evaluate(rangeExpr.start);
+                int end = (int) evaluate(rangeExpr.end);
+                int step = (int) evaluate(rangeExpr.step);
+                
+                // Perform the loop
+                for (int i = start; (step > 0) ? i < end : i > end; i += step) {
+                    // Bind the loop variable
+                    variables.put(forLoop.variable, i);
+                    
+                    // Execute the body
+                    for (ASTNode stmt : forLoop.body) {
+                        execute(stmt);
+                    }
                 }
             }
         } else if (node instanceof VarAssign varAssign) {
