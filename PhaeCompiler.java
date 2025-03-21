@@ -361,7 +361,6 @@ class Parser {
         return statements;
     }
 
-    // expression parsing
     private ASTNode parseExpression() {
         ASTNode left = parsePrimary();
         while (peek().type == TokenType.OPERATOR) {
