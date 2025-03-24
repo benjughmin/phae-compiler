@@ -4,7 +4,7 @@ import java.util.*;
 enum TokenType { 
     WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, FOR, IN, RANGE,
     OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, 
-    LEFT_PAREN, RIGHT_PAREN, COMMA, EOF 
+    LEFT_PAREN, RIGHT_PAREN, COMMA, EOF, FUNCTION, RETURN 
 }
 
 class Token {
@@ -25,7 +25,7 @@ class Token {
 class Lexer {
     private String input;
     private int pos = 0;
-    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print", "for", "in", "range");
+    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print", "for", "in", "range", "function", "return");
 
     Lexer(String input) {
         this.input = input;
@@ -135,6 +135,39 @@ class Lexer {
 // AST Nodes
 abstract class ASTNode {}
 
+// Function declaration node
+class FunctionDecl extends ASTNode {
+    String name;
+    List<String> parameters;
+    List<ASTNode> body;
+
+    FunctionDecl(String name, List<String> parameters, List<ASTNode> body) {
+        this.name = name;
+        this.parameters = parameters;
+        this.body = body;
+    }
+}
+
+// Function call node
+class FunctionCall extends ASTNode {
+    String name;
+    List<ASTNode> arguments;
+
+    FunctionCall(String name, List<ASTNode> arguments) {
+        this.name = name;
+        this.arguments = arguments;
+    }
+}
+
+// Return statement node
+class ReturnStmt extends ASTNode {
+    ASTNode value;
+
+    ReturnStmt(ASTNode value) {
+        this.value = value;
+    }
+}
+
 // for loop node
 class ForLoop extends ASTNode {
     String variable;     // Loop variable name
@@ -236,13 +269,79 @@ class Parser {
                 nodes.add(parsePrintStmt());
             } else if (peek().type == TokenType.FOR) {  
                 nodes.add(parseForLoop());
-            } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
-                nodes.add(parseVarAssign());
+            } else if (peek().type == TokenType.FUNCTION) {
+                nodes.add(parseFunctionDecl());
+            } else if (peek().type == TokenType.RETURN) {
+                nodes.add(parseReturnStmt());
+            } else if (peek().type == TokenType.IDENTIFIER) {
+                if (peekNext().type == TokenType.ASSIGN) {
+                    nodes.add(parseVarAssign());
+                } else if (peekNext().type == TokenType.LEFT_PAREN) {
+                    nodes.add(parseFunctionCall());
+                    consume(TokenType.SEMICOLON);
+                } else {
+                    throw new RuntimeException("Unexpected token after identifier: " + peekNext().type);
+                }
             } else {
                 throw new RuntimeException("Unexpected token: " + peek().type);
             }
         }
         return nodes;
+    }
+    
+    // Function declaration parsing
+    private ASTNode parseFunctionDecl() {
+        consume(TokenType.FUNCTION);
+        Token name = consume(TokenType.IDENTIFIER);
+        
+        consume(TokenType.LEFT_PAREN);
+        List<String> parameters = new ArrayList<>();
+        
+        if (peek().type != TokenType.RIGHT_PAREN) {
+            do {
+                Token param = consume(TokenType.IDENTIFIER);
+                parameters.add(param.value);
+                if (peek().type == TokenType.COMMA) {
+                    consume(TokenType.COMMA);
+                } else {
+                    break;
+                }
+            } while (true);
+        }
+        
+        consume(TokenType.RIGHT_PAREN);
+        List<ASTNode> body = parseBlock();
+        
+        return new FunctionDecl(name.value, parameters, body);
+    }
+    
+    // Function call parsing
+    private ASTNode parseFunctionCall() {
+        Token name = consume(TokenType.IDENTIFIER);
+        consume(TokenType.LEFT_PAREN);
+        
+        List<ASTNode> arguments = new ArrayList<>();
+        if (peek().type != TokenType.RIGHT_PAREN) {
+            do {
+                arguments.add(parseExpression());
+                if (peek().type == TokenType.COMMA) {
+                    consume(TokenType.COMMA);
+                } else {
+                    break;
+                }
+            } while (true);
+        }
+        
+        consume(TokenType.RIGHT_PAREN);
+        return new FunctionCall(name.value, arguments);
+    }
+    
+    // Return statement parsing
+    private ASTNode parseReturnStmt() {
+        consume(TokenType.RETURN);
+        ASTNode value = parseExpression();
+        consume(TokenType.SEMICOLON);
+        return new ReturnStmt(value);
     }
 
     // for loop parsing
@@ -344,35 +443,49 @@ class Parser {
     private List<ASTNode> parseBlock() {
         consume(TokenType.LEFT_BRACE);
         List<ASTNode> statements = new ArrayList<>();
+        
         while (peek().type != TokenType.RIGHT_BRACE) {
             if (peek().type == TokenType.IF) {
                 statements.add(parseIfStmt());
             } else if (peek().type == TokenType.PRINT) {
                 statements.add(parsePrintStmt());
-            } else if (peek().type == TokenType.FOR) {  // Add this case
+            } else if (peek().type == TokenType.FOR) {
                 statements.add(parseForLoop());
-            } else if (peek().type == TokenType.IDENTIFIER && peekNext().type == TokenType.ASSIGN) {
-                statements.add(parseVarAssign());
+            } else if (peek().type == TokenType.RETURN) {
+                statements.add(parseReturnStmt());
+            } else if (peek().type == TokenType.IDENTIFIER) {
+                if (peekNext().type == TokenType.ASSIGN) {
+                    statements.add(parseVarAssign());
+                } else if (peekNext().type == TokenType.LEFT_PAREN) {
+                    statements.add(parseFunctionCall());
+                    consume(TokenType.SEMICOLON);
+                } else {
+                    throw new RuntimeException("Unexpected token after identifier in block: " + peekNext().type);
+                }
             } else {
                 throw new RuntimeException("Unexpected token in block: " + peek().type);
             }
         }
+        
         consume(TokenType.RIGHT_BRACE);
         return statements;
     }
 
     private ASTNode parseExpression() {
         ASTNode left = parsePrimary();
+        
         while (peek().type == TokenType.OPERATOR) {
             Token operator = consume(TokenType.OPERATOR);
             ASTNode right = parsePrimary();
             left = new BinaryExpr(left, operator, right);
         }
+        
         return left;
     }
 
     private ASTNode parsePrimary() {
         Token token = peek();
+        
         if (token.type == TokenType.NUMBER) {
             advance();
             return new Expression(token.value, TokenType.NUMBER);
@@ -381,6 +494,11 @@ class Parser {
             return new Expression(token.value, TokenType.STRING);
         } else if (token.type == TokenType.IDENTIFIER) {
             advance();
+            if (peek().type == TokenType.LEFT_PAREN) {
+                // This is a function call in an expression
+                pos--; // Go back to the identifier
+                return parseFunctionCall();
+            }
             return new Expression(token.value, TokenType.IDENTIFIER);
         } else if (token.type == TokenType.LEFT_PAREN) {
             advance();
@@ -414,56 +532,137 @@ class Parser {
     }
 }
 
+// Function data
+class Function {
+    String name;
+    List<String> parameters;
+    List<ASTNode> body;
+    
+    Function(String name, List<String> parameters, List<ASTNode> body) {
+        this.name = name;
+        this.parameters = parameters;
+        this.body = body;
+    }
+}
+
+// Return value signal
+class ReturnValue {
+    Object value;
+    
+    ReturnValue(Object value) {
+        this.value = value;
+    }
+}
+
 // Interpreter
 class Interpreter {
-    private Map<String, Object> variables = new HashMap<>();
+    private Map<String, Object> globalVariables = new HashMap<>();
+    private Map<String, Function> functions = new HashMap<>();
+    private boolean returnSignal = false;
+    private Object returnValue = null;
     
     void interpret(List<ASTNode> nodes) {
         for (ASTNode node : nodes) {
-            execute(node);
+            execute(node, globalVariables);
+            if (returnSignal) {
+                break;
+            }
         }
     }
     
-    private void execute(ASTNode node) {
+    private Object execute(ASTNode node, Map<String, Object> variables) {
+        if (returnSignal) {
+            return null;
+        }
+        
         if (node instanceof PrintStmt printStmt) {
-            Object value = evaluate(printStmt.expression);
+            Object value = evaluate(printStmt.expression, variables);
             System.out.println(value);
         } else if (node instanceof IfStmt ifStmt) {
-            boolean condition = isTrue(evaluate(ifStmt.condition));
+            boolean condition = isTrue(evaluate(ifStmt.condition, variables));
             if (condition) {
                 for (ASTNode stmt : ifStmt.thenBranch) {
-                    execute(stmt);
+                    execute(stmt, variables);
+                    if (returnSignal) break;
                 }
             } else if (!ifStmt.elseBranch.isEmpty()) {
                 for (ASTNode stmt : ifStmt.elseBranch) {
-                    execute(stmt);
+                    execute(stmt, variables);
+                    if (returnSignal) break;
                 }
             }
         } else if (node instanceof ForLoop forLoop) {
-            // Evaluate the iterable
             if (forLoop.iterable instanceof RangeExpr rangeExpr) {
-                int start = (int) evaluate(rangeExpr.start);
-                int end = (int) evaluate(rangeExpr.end);
-                int step = (int) evaluate(rangeExpr.step);
+                int start = (int) evaluate(rangeExpr.start, variables);
+                int end = (int) evaluate(rangeExpr.end, variables);
+                int step = (int) evaluate(rangeExpr.step, variables);
                 
-                // Perform the loop
                 for (int i = start; (step > 0) ? i < end : i > end; i += step) {
-                    // Bind the loop variable
                     variables.put(forLoop.variable, i);
                     
-                    // Execute the body
                     for (ASTNode stmt : forLoop.body) {
-                        execute(stmt);
+                        execute(stmt, variables);
+                        if (returnSignal) return null;
                     }
                 }
             }
         } else if (node instanceof VarAssign varAssign) {
-            Object value = evaluate(varAssign.expression);
+            Object value = evaluate(varAssign.expression, variables);
             variables.put(varAssign.identifier, value);
+        } else if (node instanceof FunctionDecl funcDecl) {
+            // Store function for later use
+            functions.put(funcDecl.name, new Function(funcDecl.name, funcDecl.parameters, funcDecl.body));
+        } else if (node instanceof FunctionCall funcCall) {
+            return callFunction(funcCall.name, funcCall.arguments, variables);
+        } else if (node instanceof ReturnStmt returnStmt) {
+            returnValue = evaluate(returnStmt.value, variables);
+            returnSignal = true;
+            return returnValue;
         }
+        
+        return null;
     }
     
-    private Object evaluate(ASTNode node) {
+    private Object callFunction(String name, List<ASTNode> arguments, Map<String, Object> currentScope) {
+        if (!functions.containsKey(name)) {
+            throw new RuntimeException("Undefined function: " + name);
+        }
+        
+        Function function = functions.get(name);
+        
+        // Create a new scope for the function
+        Map<String, Object> functionScope = new HashMap<>();
+        
+        // Evaluate and bind arguments to parameters
+        if (arguments.size() != function.parameters.size()) {
+            throw new RuntimeException("Expected " + function.parameters.size() + 
+                                      " arguments but got " + arguments.size());
+        }
+        
+        for (int i = 0; i < arguments.size(); i++) {
+            Object argValue = evaluate(arguments.get(i), currentScope);
+            functionScope.put(function.parameters.get(i), argValue);
+        }
+        
+        // Reset return signal
+        returnSignal = false;
+        returnValue = null;
+        
+        // Execute function body
+        for (ASTNode stmt : function.body) {
+            execute(stmt, functionScope);
+            if (returnSignal) {
+                // Reset return signal for next function call
+                returnSignal = false;
+                return returnValue;
+            }
+        }
+        
+        // Default return value if no return statement
+        return null;
+    }
+    
+    private Object evaluate(ASTNode node, Map<String, Object> variables) {
         if (node instanceof Expression expr) {
             if (expr.type == TokenType.NUMBER) {
                 return Integer.parseInt(expr.value);
@@ -476,8 +675,8 @@ class Interpreter {
                 return variables.get(expr.value);
             }
         } else if (node instanceof BinaryExpr binExpr) {
-            Object left = evaluate(binExpr.left);
-            Object right = evaluate(binExpr.right);
+            Object left = evaluate(binExpr.left, variables);
+            Object right = evaluate(binExpr.right, variables);
             
             switch (binExpr.operator.value) {
                 case "+":
@@ -520,6 +719,8 @@ class Interpreter {
                 default:
                     throw new RuntimeException("Unknown operator: " + binExpr.operator.value);
             }
+        } else if (node instanceof FunctionCall funcCall) {
+            return callFunction(funcCall.name, funcCall.arguments, variables);
         }
         
         throw new RuntimeException("Could not evaluate node: " + node.getClass().getSimpleName());
