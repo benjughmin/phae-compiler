@@ -2,10 +2,11 @@ import java.util.*;
 
 // Token class
 enum TokenType { 
-    WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, FOR, IN, RANGE,
+    WOW, IDENTIFIER, NUMBER, FLOAT, STRING, IF, ELSE, WHILE, PRINT, FOR, IN, RANGE,
     OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, 
     LEFT_PAREN, RIGHT_PAREN, COMMA, EOF, FUNCTION, RETURN, INPUT
 }
+
 
 class Token {
     TokenType type;
@@ -70,11 +71,17 @@ class Lexer {
                 continue;
             } else if (Character.isDigit(current)) {
                 StringBuilder number = new StringBuilder();
-                while (Character.isDigit(peek())) {
+                boolean hasDot = false;
+            
+                while (Character.isDigit(peek()) || (peek() == '.' && !hasDot)) {
+                    if (peek() == '.') hasDot = true;
                     number.append(peek());
                     advance();
                 }
-                tokens.add(new Token(TokenType.NUMBER, number.toString()));
+            
+                // If the number contains a dot, it's a FLOAT, otherwise it's an INTEGER
+                TokenType type = hasDot ? TokenType.FLOAT : TokenType.NUMBER;
+                tokens.add(new Token(type, number.toString()));
             } else if (current == '"') {
                 advance(); // Skip opening quote
                 StringBuilder string = new StringBuilder();
@@ -241,6 +248,7 @@ class PrintStmt extends ASTNode {
 }
 
 // expression node
+// Expression node (supports int and float)
 class Expression extends ASTNode {
     String value;
     TokenType type;
@@ -249,7 +257,12 @@ class Expression extends ASTNode {
         this.value = value;
         this.type = type;
     }
+
+    Object getValue() {
+        return type == TokenType.FLOAT ? Double.parseDouble(value) : Integer.parseInt(value);
+    }
 }
+
 
 // binary expression node
 class BinaryExpr extends ASTNode {
@@ -543,17 +556,16 @@ class Parser {
 
     private ASTNode parsePrimary() {
         Token token = peek();
-        
-        if (token.type == TokenType.NUMBER) {
+    
+        if (token.type == TokenType.NUMBER || token.type == TokenType.FLOAT) {
             advance();
-            return new Expression(token.value, TokenType.NUMBER);
+            return new Expression(token.value, token.type);
         } else if (token.type == TokenType.STRING) {
             advance();
             return new Expression(token.value, TokenType.STRING);
         } else if (token.type == TokenType.IDENTIFIER) {
             advance();
             if (peek().type == TokenType.LEFT_PAREN) {
-                // This is a function call in an expression
                 pos--; // Go back to the identifier
                 return parseFunctionCall();
             }
@@ -567,6 +579,7 @@ class Parser {
             throw new RuntimeException("Unexpected token: " + token.type);
         }
     }
+    
 
     private Token consume(TokenType expected) {
         Token token = tokens.get(pos);
@@ -743,6 +756,8 @@ class Interpreter {
         if (node instanceof Expression expr) {
             if (expr.type == TokenType.NUMBER) {
                 return Integer.parseInt(expr.value);
+            } else if (expr.type == TokenType.FLOAT) {
+                return Double.parseDouble(expr.value);
             } else if (expr.type == TokenType.STRING) {
                 return expr.value;
             } else if (expr.type == TokenType.IDENTIFIER) {
@@ -754,54 +769,68 @@ class Interpreter {
         } else if (node instanceof BinaryExpr binExpr) {
             Object left = evaluate(binExpr.left, variables);
             Object right = evaluate(binExpr.right, variables);
-            
+    
+            // Convert both to double if one is a float
+            if (left instanceof Integer && right instanceof Double) {
+                left = ((Integer) left).doubleValue();
+            }
+            if (left instanceof Double && right instanceof Integer) {
+                right = ((Integer) right).doubleValue();
+            }
+    
             switch (binExpr.operator.value) {
                 case "+":
-                    if (left instanceof Integer && right instanceof Integer) {
-                        return (Integer)left + (Integer)right;
-                    } else {
-                        return left.toString() + right.toString();
-                    }
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left + (Double) right) 
+                        : ((Integer) left + (Integer) right);
                 case "-":
-                    checkNumbers(left, right);
-                    return (Integer)left - (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left - (Double) right) 
+                        : ((Integer) left - (Integer) right);
                 case "*":
-                    checkNumbers(left, right);
-                    return (Integer)left * (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left * (Double) right) 
+                        : ((Integer) left * (Integer) right);
                 case "/":
-                    checkNumbers(left, right);
-                    if ((Integer)right == 0) {
+                    if ((right instanceof Integer && (Integer) right == 0) || (right instanceof Double && (Double) right == 0.0)) {
                         throw new RuntimeException("Division by zero");
                     }
-                    return (Integer)left / (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left / (Double) right) 
+                        : ((Integer) left / (Integer) right);
                 case "%":
-                    checkNumbers(left, right);
-                    return (Integer)left % (Integer)right;
+                    if (left instanceof Double || right instanceof Double) {
+                        throw new RuntimeException("Modulo operator is not supported for floating-point numbers");
+                    }
+                    return (Integer) left % (Integer) right;
                 case "==":
                     return isEqual(left, right);
                 case "!=":
                     return !isEqual(left, right);
                 case ">":
-                    checkNumbers(left, right);
-                    return (Integer)left > (Integer)right;
-                case ">=":
-                    checkNumbers(left, right);
-                    return (Integer)left >= (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left > (Double) right) 
+                        : ((Integer) left > (Integer) right);
                 case "<":
-                    checkNumbers(left, right);
-                    return (Integer)left < (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left < (Double) right) 
+                        : ((Integer) left < (Integer) right);
+                case ">=":
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left >= (Double) right) 
+                        : ((Integer) left >= (Integer) right);
                 case "<=":
-                    checkNumbers(left, right);
-                    return (Integer)left <= (Integer)right;
+                    return (left instanceof Double || right instanceof Double) 
+                        ? ((Double) left <= (Double) right) 
+                        : ((Integer) left <= (Integer) right);
                 default:
                     throw new RuntimeException("Unknown operator: " + binExpr.operator.value);
             }
-        } else if (node instanceof FunctionCall funcCall) {
-            return callFunction(funcCall.name, funcCall.arguments, variables);
         }
         
         throw new RuntimeException("Could not evaluate node: " + node.getClass().getSimpleName());
     }
+    
     
     private boolean isEqual(Object a, Object b) {
         if (a == null && b == null) return true;
