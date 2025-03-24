@@ -55,44 +55,66 @@ public class CompilerGUI extends JFrame {
         try {
             // Get the code from the editor
             String code = codeEditor.getText();
-
-            // Clear the output area
-            outputArea.setText("");
-
-            // Save the original System.out
+            outputArea.setText(""); // Clear the output
+    
+            // Capture user input before execution
+            String modifiedCode = preprocessInput(code);
+    
+            // Save original System.out and System.in
             PrintStream originalOut = System.out;
-
-            // Create a stream to capture output
+            InputStream originalIn = System.in;
+    
+            // Create output capture stream
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             PrintStream captureStream = new PrintStream(outputStream);
-
-            // Redirect System.out to our capture stream
             System.setOut(captureStream);
-
-            // Run the compiler with the input redirected
-            InputStream originalIn = System.in;
-            ByteArrayInputStream inputStream = new ByteArrayInputStream((code + "\nEND\n").getBytes());
+    
+            // Set System.in with modified code
+            ByteArrayInputStream inputStream = new ByteArrayInputStream((modifiedCode + "\nEND\n").getBytes());
             System.setIn(inputStream);
-
-            // Call the main method of your compiler
+    
+            // Run compiler
             PhaeCompiler.main(new String[0]);
-
-            // Restore the original streams
+    
+            // Restore original System.out and System.in
             System.setOut(originalOut);
             System.setIn(originalIn);
-
-            // Get the captured output
-            String output = outputStream.toString().trim();
-
-            // Display the output
-            outputArea.setText(output);
-
+    
+            // Show output
+            outputArea.setText(outputStream.toString().trim());
+    
         } catch (Exception ex) {
-            // Display any errors
             outputArea.setText("Error: " + ex.getMessage());
             ex.printStackTrace();
         }
     }
+
+    private String preprocessInput(String code) {
+        String[] lines = code.split("\n");
+        StringBuilder modifiedCode = new StringBuilder();
+    
+        for (String line : lines) {
+            if (line.trim().startsWith("input(") && line.trim().endsWith(");")) {
+                // Extract variable name inside input()
+                String varName = line.trim().substring(6, line.trim().length() - 2);
+    
+                // Show input dialog
+                String userInput = JOptionPane.showInputDialog(this, 
+                    "Enter value for " + varName + ":", 
+                    "Input Required", JOptionPane.QUESTION_MESSAGE);
+    
+                if (userInput == null) userInput = ""; // Handle cancel
+    
+                // Replace input statement with direct assignment
+                modifiedCode.append(varName).append(" = \"").append(userInput).append("\";\n");
+            } else {
+                modifiedCode.append(line).append("\n");
+            }
+        }
+        return modifiedCode.toString();
+    }
+    
+    
 
     public static void main(String[] args) {
         // Create the GUI on the Event Dispatch Thread
