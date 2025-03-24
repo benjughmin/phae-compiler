@@ -4,7 +4,7 @@ import java.util.*;
 enum TokenType { 
     WOW, IDENTIFIER, NUMBER, STRING, IF, ELSE, WHILE, PRINT, FOR, IN, RANGE,
     OPERATOR, ASSIGN, SEMICOLON, LEFT_BRACE, RIGHT_BRACE, 
-    LEFT_PAREN, RIGHT_PAREN, COMMA, EOF, FUNCTION, RETURN 
+    LEFT_PAREN, RIGHT_PAREN, COMMA, EOF, FUNCTION, RETURN, INPUT
 }
 
 class Token {
@@ -25,8 +25,10 @@ class Token {
 class Lexer {
     private String input;
     private int pos = 0;
-    private static final Set<String> keywords = Set.of("WOW", "if", "else", "while", "print", "for", "in", "range", "function", "return");
-
+    private static final Set<String> keywords = Set.of(
+        "WOW", "if", "else", "while", "print", "for", "in", "range", 
+        "function", "return", "input"
+    );
     Lexer(String input) {
         this.input = input;
     }
@@ -52,7 +54,18 @@ class Lexer {
                     advance();
                 }
                 String word = ident.toString();
-                TokenType type = keywords.contains(word) ? TokenType.valueOf(word.toUpperCase()) : TokenType.IDENTIFIER;
+                TokenType type;
+                
+                if (keywords.contains(word)) {
+                    if (word.equals("input")) {
+                        type = TokenType.INPUT;
+                    } else {
+                        type = TokenType.valueOf(word.toUpperCase());
+                    }
+                } else {
+                    type = TokenType.IDENTIFIER;
+                }
+
                 tokens.add(new Token(type, word));
                 continue;
             } else if (Character.isDigit(current)) {
@@ -181,6 +194,17 @@ class ForLoop extends ASTNode {
     }
 }
 
+// while loop node
+class WhileLoop extends ASTNode {
+    ASTNode condition;
+    List<ASTNode> body;
+
+    WhileLoop(ASTNode condition, List<ASTNode> body) {
+        this.condition = condition;
+        this.body = body;
+    }
+}
+
 // range() node
 class RangeExpr extends ASTNode {
     ASTNode start;
@@ -251,6 +275,15 @@ class VarAssign extends ASTNode {
     }
 }
 
+// INPUT node
+class InputStmt extends ASTNode {
+    String identifier;
+
+    InputStmt(String identifier) {
+        this.identifier = identifier;
+    }
+}
+
 // Parser
 class Parser {
     private List<Token> tokens;
@@ -267,8 +300,12 @@ class Parser {
                 nodes.add(parseIfStmt());
             } else if (peek().type == TokenType.PRINT) {
                 nodes.add(parsePrintStmt());
+            } else if (peek().type == TokenType.INPUT) {
+                nodes.add(parseInputStmt());
             } else if (peek().type == TokenType.FOR) {  
                 nodes.add(parseForLoop());
+            } else if (peek().type == TokenType.WHILE) {  
+                nodes.add(parseWhileLoop());
             } else if (peek().type == TokenType.FUNCTION) {
                 nodes.add(parseFunctionDecl());
             } else if (peek().type == TokenType.RETURN) {
@@ -368,6 +405,16 @@ class Parser {
         return new ForLoop(variable, iterable, body);
     }
     
+    // while loop parsing
+    private ASTNode parseWhileLoop() {
+        consume(TokenType.WHILE);
+        consume(TokenType.LEFT_PAREN);
+        ASTNode condition = parseExpression();
+        consume(TokenType.RIGHT_PAREN);
+        List<ASTNode> body = parseBlock();
+        return new WhileLoop(condition, body);
+    }
+
     // range() parsing
     private ASTNode parseRange() {
         consume(TokenType.RANGE);
@@ -439,6 +486,15 @@ class Parser {
         return new IfStmt(condition, thenBranch, elseBranch);
     }
 
+    private ASTNode parseInputStmt() {
+        consume(TokenType.INPUT);
+        consume(TokenType.LEFT_PAREN);
+        Token identifier = consume(TokenType.IDENTIFIER);
+        consume(TokenType.RIGHT_PAREN);
+        consume(TokenType.SEMICOLON);
+        return new InputStmt(identifier.value);
+    }    
+
     // block parsing
     private List<ASTNode> parseBlock() {
         consume(TokenType.LEFT_BRACE);
@@ -453,6 +509,8 @@ class Parser {
                 statements.add(parseForLoop());
             } else if (peek().type == TokenType.RETURN) {
                 statements.add(parseReturnStmt());
+            } else if (peek().type == TokenType.INPUT) {
+                statements.add(parseInputStmt());
             } else if (peek().type == TokenType.IDENTIFIER) {
                 if (peekNext().type == TokenType.ASSIGN) {
                     statements.add(parseVarAssign());
@@ -606,6 +664,13 @@ class Interpreter {
                     }
                 }
             }
+        } else if (node instanceof WhileLoop whileLoop) {
+            while (isTrue(evaluate(whileLoop.condition, variables))) {
+                for (ASTNode stmt : whileLoop.body) {
+                    execute(stmt, variables);
+                    if (returnSignal) return null; // Allow early exits
+                }
+            }
         } else if (node instanceof VarAssign varAssign) {
             Object value = evaluate(varAssign.expression, variables);
             variables.put(varAssign.identifier, value);
@@ -618,7 +683,19 @@ class Interpreter {
             returnValue = evaluate(returnStmt.value, variables);
             returnSignal = true;
             return returnValue;
+        } else if (node instanceof InputStmt inputStmt) {
+            Scanner scanner = new Scanner(System.in);
+            System.out.print("Enter value for " + inputStmt.identifier + ": ");
+            String input = scanner.nextLine();
+        
+            // Try to parse input as a number; otherwise, store as a string.
+            try {
+                variables.put(inputStmt.identifier, Integer.parseInt(input));
+            } catch (NumberFormatException e) {
+                variables.put(inputStmt.identifier, input);
+            }
         }
+        
         
         return null;
     }
@@ -762,7 +839,6 @@ public class PhaeCompiler {
             if (line.equals("END")) break;
             codeBuilder.append(line).append("\n");
         }
-        scanner.close();
 
         try {
             String sourceCode = codeBuilder.toString();
